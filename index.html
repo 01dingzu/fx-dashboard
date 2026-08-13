@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>汇率及其他理财标的观察台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部栏 -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 class="logo">汇率及其他理财标的观察台</h1>
+        <span id="last-update" class="last-update"></span>
+      </div>
+      <div class="topbar-right">
+        <button id="refresh-btn" class="topbar-btn" title="刷新">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </button>
+        <button id="add-pair-btn" class="topbar-btn primary" title="添加标的">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>添加</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 主体 -->
+    <div class="main-layout">
+      <!-- 侧边栏 -->
+      <aside class="sidebar">
+        <!-- Tab 切换 -->
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-pane="pane-rates">观察列表</button>
+          <button class="sidebar-tab" data-pane="pane-products">理财产品 <span id="product-count" class="pair-count">0</span></button>
+        </div>
+
+        <!-- 观察列表 -->
+        <div id="pane-rates" class="sidebar-pane active">
+          <div class="sidebar-header">
+            <h2>观察列表</h2>
+            <span id="pair-count" class="pair-count">0</span>
+          </div>
+          <div id="pair-list" class="pair-list">
+            <!-- 标的卡片动态生成 -->
+          </div>
+        </div>
+
+        <!-- 理财产品列表 -->
+        <div id="pane-products" class="sidebar-pane">
+          <div class="sidebar-header">
+            <h2>理财产品</h2>
+            <button id="add-product-btn" class="sidebar-add-btn" title="添加产品">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          </div>
+          <div id="product-list" class="pair-list">
+            <!-- 产品卡片动态生成 -->
+          </div>
+        </div>
+      </aside>
+
+      <!-- 内容区 -->
+      <main class="content">
+        <!-- 当前选中标的详情 -->
+        <div id="pair-detail" class="pair-detail">
+          <div class="detail-header">
+            <div class="detail-pair">
+              <span id="detail-base" class="detail-currency"></span>
+              <span class="detail-slash">/</span>
+              <span id="detail-target" class="detail-currency"></span>
+            </div>
+            <div class="detail-rate">
+              <span id="detail-rate-value" class="rate-value">--</span>
+              <span id="detail-change" class="rate-change">--</span>
+            </div>
+          </div>
+
+          <!-- 时间范围选择 -->
+          <div class="time-range-tabs">
+            <button class="range-btn" data-range="7">1周</button>
+            <button class="range-btn active" data-range="30">1月</button>
+            <button class="range-btn" data-range="90">3月</button>
+            <button class="range-btn" data-range="180">6月</button>
+            <button class="range-btn" data-range="365">1年</button>
+          </div>
+
+          <!-- 走势图 -->
+          <div class="chart-section">
+            <div class="chart-header">
+              <h3>走势图</h3>
+              <label class="ma-toggle">
+                <input type="checkbox" id="show-ma" checked>
+                <span>均线 MA5/MA20</span>
+              </label>
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="fx-chart"></canvas>
+            </div>
+          </div>
+
+          <!-- 分析面板 -->
+          <div class="analysis-section">
+            <div class="analysis-tabs">
+              <button class="analysis-tab active" data-tab="stats">量化统计</button>
+              <button class="analysis-tab" data-tab="factors">变动因素</button>
+              <button class="analysis-tab" data-tab="news">资讯链接</button>
+            </div>
+
+            <!-- 量化统计 -->
+            <div id="tab-stats" class="analysis-panel active">
+              <div class="stats-grid" id="stats-grid">
+                <!-- 统计数据动态生成 -->
+              </div>
+            </div>
+
+            <!-- 变动因素 -->
+            <div id="tab-factors" class="analysis-panel">
+              <div id="factors-content" class="factors-content">
+                <!-- 因素分析动态生成 -->
+              </div>
+            </div>
+
+            <!-- 资讯链接 -->
+            <div id="tab-news" class="analysis-panel">
+              <div id="news-content" class="news-content">
+                <!-- 新闻链接动态生成 -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 空状态 -->
+        <div id="empty-state" class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 3v18h18"/>
+            <path d="M7 14l4-4 4 2 5-6"/>
+          </svg>
+          <p>还没有添加观察的标的</p>
+          <p class="empty-hint">点击右上角"添加"开始</p>
+        </div>
+
+        <!-- 理财产品详情 -->
+        <div id="product-detail" class="product-detail-section">
+          <!-- 点击产品卡片后动态生成 -->
+        </div>
+      </main>
+    </div>
+
+    <!-- 添加标的面板 -->
+    <div id="add-pair-overlay" class="modal-overlay"></div>
+    <div id="add-pair-modal" class="modal">
+      <div class="modal-header">
+        <h3>添加观察标的</h3>
+        <button id="close-add-modal" class="icon-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- 类型切换 Tab -->
+        <div class="add-type-tabs">
+          <button class="add-type-tab active" data-type="fx">💱 汇率</button>
+          <button class="add-type-tab" data-type="metal">🥇 贵金属</button>
+          <button class="add-type-tab" data-type="bond">📊 国债</button>
+          <button class="add-type-tab" data-type="index">📈 指数</button>
+        </div>
+
+        <!-- 汇率面板 -->
+        <div id="add-content-fx" class="add-type-content active">
+          <div class="pair-builder">
+            <div class="currency-select-group">
+              <label>基准货币</label>
+              <select id="base-currency" class="currency-select"></select>
+            </div>
+            <div class="pair-arrow">→</div>
+            <div class="currency-select-group">
+              <label>目标货币</label>
+              <select id="target-currency" class="currency-select"></select>
+            </div>
+          </div>
+
+          <div class="quick-pairs">
+            <p class="quick-label">常用货币对</p>
+            <div class="quick-pair-list" id="quick-pair-list">
+              <!-- 快速选择按钮 -->
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button id="confirm-add-pair" class="btn-primary">添加</button>
+          </div>
+        </div>
+
+        <!-- 贵金属面板 -->
+        <div id="add-content-metal" class="add-type-content">
+          <div class="quick-pairs">
+            <p class="quick-label">选择贵金属</p>
+            <div class="quick-pair-list" id="metal-option-list">
+              <!-- 贵金属选项动态生成 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 国债面板 -->
+        <div id="add-content-bond" class="add-type-content">
+          <div class="quick-pairs">
+            <p class="quick-label">选择国债品种</p>
+            <div class="quick-pair-list" id="bond-option-list">
+              <!-- 国债选项动态生成 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 指数面板 -->
+        <div id="add-content-index" class="add-type-content">
+          <div class="quick-pairs">
+            <p class="quick-label">选择股市指数</p>
+            <div class="quick-pair-list" id="index-option-list">
+              <!-- 指数选项动态生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加理财产品面板 -->
+    <div id="product-modal-overlay" class="modal-overlay"></div>
+    <div id="product-modal" class="modal modal-large">
+      <div class="modal-header">
+        <h3>添加理财产品</h3>
+        <button id="close-product-modal" class="icon-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body modal-body-scroll">
+        <!-- 基本信息 -->
+        <div class="form-section">
+          <h4 class="form-section-title">基本信息</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>产品名称</label>
+              <input type="text" id="product-name" class="form-input" placeholder="如：区间累积型美元理财">
+            </div>
+            <div class="form-group">
+              <label>产品类型</label>
+              <select id="product-type" class="form-input">
+                <option value="range_accumulate">📊 区间累积型</option>
+                <option value="knockout">🚧 敲出型</option>
+                <option value="shark_fin">🦈 鲨鱼鳍</option>
+                <option value="dual_currency">💱 双币理财</option>
+                <option value="custom">⚙️ 自定义</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>挂钩汇率标的</label>
+              <select id="product-pair" class="form-input"></select>
+            </div>
+            <div class="form-group">
+              <label>投资金额</label>
+              <input type="number" id="product-amount" class="form-input" placeholder="100000">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>金额币种</label>
+              <select id="product-currency" class="form-input">
+                <option value="CNY">CNY 人民币</option>
+                <option value="USD">USD 美元</option>
+                <option value="EUR">EUR 欧元</option>
+                <option value="GBP">GBP 英镑</option>
+                <option value="HKD">HKD 港币</option>
+                <option value="JPY">JPY 日元</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>买入时汇率</label>
+              <input type="number" step="0.0001" id="product-entry-rate" class="form-input" placeholder="7.1500">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>起息日</label>
+              <input type="date" id="product-start-date" class="form-input">
+            </div>
+            <div class="form-group">
+              <label>到期日</label>
+              <input type="date" id="product-end-date" class="form-input">
+            </div>
+          </div>
+        </div>
+
+        <!-- 区间累积型参数 -->
+        <div id="fields-range_accumulate" class="form-section product-type-fields">
+          <h4 class="form-section-title">区间参数</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>区间下界</label>
+              <input type="number" step="0.0001" id="ra-lower" class="form-input" placeholder="7.0000">
+            </div>
+            <div class="form-group">
+              <label>区间上界</label>
+              <input type="number" step="0.0001" id="ra-upper" class="form-input" placeholder="7.3000">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>区间内年化 (%)</label>
+              <input type="number" step="0.01" id="ra-high-coupon" class="form-input" placeholder="5.00">
+            </div>
+            <div class="form-group">
+              <label>区间外年化 (%)</label>
+              <input type="number" step="0.01" id="ra-low-coupon" class="form-input" placeholder="1.00">
+            </div>
+          </div>
+        </div>
+
+        <!-- 敲出型参数 -->
+        <div id="fields-knockout" class="form-section product-type-fields" style="display:none">
+          <h4 class="form-section-title">敲出参数</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>敲出线</label>
+              <input type="number" step="0.0001" id="ko-level" class="form-input" placeholder="7.3500">
+            </div>
+            <div class="form-group">
+              <label>敲出方向</label>
+              <select id="ko-direction" class="form-input">
+                <option value="up">向上敲出（汇率涨破触发）</option>
+                <option value="down">向下敲出（汇率跌破触发）</option>
+                <option value="both">双向敲出</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>未敲出年化 (%)</label>
+              <input type="number" step="0.01" id="ko-base-coupon" class="form-input" placeholder="4.00">
+            </div>
+            <div class="form-group">
+              <label>敲出后年化 (%)</label>
+              <input type="number" step="0.01" id="ko-coupon" class="form-input" placeholder="1.50">
+            </div>
+          </div>
+        </div>
+
+        <!-- 鲨鱼鳍参数 -->
+        <div id="fields-shark_fin" class="form-section product-type-fields" style="display:none">
+          <h4 class="form-section-title">鲨鱼鳍参数</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>保底下限</label>
+              <input type="number" step="0.0001" id="sf-floor" class="form-input" placeholder="7.0000">
+            </div>
+            <div class="form-group">
+              <label>封顶上限</label>
+              <input type="number" step="0.0001" id="sf-cap" class="form-input" placeholder="7.3000">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>保底年化 (%)</label>
+              <input type="number" step="0.01" id="sf-base-coupon" class="form-input" placeholder="1.50">
+            </div>
+            <div class="form-group">
+              <label>封顶年化 (%)</label>
+              <input type="number" step="0.01" id="sf-cap-coupon" class="form-input" placeholder="6.00">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>参与率</label>
+              <input type="number" step="0.1" id="sf-participation" class="form-input" placeholder="1.0">
+            </div>
+          </div>
+        </div>
+
+        <!-- 双币理财参数 -->
+        <div id="fields-dual_currency" class="form-section product-type-fields" style="display:none">
+          <h4 class="form-section-title">双币理财参数</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>行权汇率</label>
+              <input type="number" step="0.0001" id="dc-strike" class="form-input" placeholder="7.2000">
+            </div>
+            <div class="form-group">
+              <label>年化收益 (%)</label>
+              <input type="number" step="0.01" id="dc-coupon" class="form-input" placeholder="3.00">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>存入币种</label>
+              <select id="dc-deposit" class="form-input">
+                <option value="CNY">CNY 人民币</option>
+                <option value="USD">USD 美元</option>
+                <option value="EUR">EUR 欧元</option>
+                <option value="HKD">HKD 港币</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>对手币种</label>
+              <select id="dc-alt" class="form-input">
+                <option value="USD">USD 美元</option>
+                <option value="CNY">CNY 人民币</option>
+                <option value="EUR">EUR 欧元</option>
+                <option value="HKD">HKD 港币</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自定义参数 -->
+        <div id="fields-custom" class="form-section product-type-fields" style="display:none">
+          <h4 class="form-section-title">自定义监控</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>监控下界</label>
+              <input type="number" step="0.0001" id="cu-lower" class="form-input" placeholder="7.0000">
+            </div>
+            <div class="form-group">
+              <label>监控上界</label>
+              <input type="number" step="0.0001" id="cu-upper" class="form-input" placeholder="7.3000">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>目标年化 (%)</label>
+              <input type="number" step="0.01" id="cu-yield" class="form-input" placeholder="4.00">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="confirm-add-product" class="btn-primary">添加产品</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- App scripts -->
+  <script src="js/factors-data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/data-adapters.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/products.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/chart-module.js"></script>
+  <script src="js/analysis.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
