@@ -58,13 +58,30 @@
         <div id="pane-products" class="sidebar-pane">
           <div class="sidebar-header">
             <h2>理财产品</h2>
-            <button id="add-product-btn" class="sidebar-add-btn" title="添加产品">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
+            <div class="sidebar-action-group">
+              <button id="export-products-btn" class="sidebar-action-btn" title="导出 Excel">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
+              <button id="import-products-btn" class="sidebar-action-btn" title="导入 Excel">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </button>
+              <button id="add-product-btn" class="sidebar-add-btn" title="添加产品">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+            </div>
           </div>
+          <input type="file" id="product-file-input" accept=".xlsx,.xls,.csv" style="display:none">
           <div id="product-list" class="pair-list">
             <!-- 产品卡片动态生成 -->
           </div>
@@ -461,6 +478,8 @@
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- SheetJS (Excel) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- App scripts -->
   <script src="js/factors-data.js"></script>
   <script src="js/api.js"></script>

@@ -16,6 +16,41 @@ const Products = {
     custom: '自定义'
   },
 
+  // Excel 列定义（header = 表头，key = 产品字段名）
+  EXCEL_COLUMNS: [
+    { header: '产品名称', key: 'name' },
+    { header: '产品类型', key: 'type' },
+    { header: '基准货币', key: 'base' },
+    { header: '目标货币', key: 'target' },
+    { header: '投资金额', key: 'amount' },
+    { header: '金额币种', key: 'currency' },
+    { header: '买入汇率', key: 'entryRate' },
+    { header: '起息日', key: 'startDate' },
+    { header: '到期日', key: 'endDate' },
+    { header: '区间下界', key: 'rangeLower' },
+    { header: '区间上界', key: 'rangeUpper' },
+    { header: '区间内年化(%)', key: 'highCoupon' },
+    { header: '区间外年化(%)', key: 'lowCoupon' },
+    { header: '敲出线', key: 'knockoutLevel' },
+    { header: '敲出方向', key: 'knockoutDirection' },
+    { header: '敲出后年化(%)', key: 'knockoutCoupon' },
+    { header: '未敲出/保底年化(%)', key: 'baseCoupon' },
+    { header: '保底下限', key: 'floorRate' },
+    { header: '封顶上限', key: 'capRate' },
+    { header: '封顶年化(%)', key: 'capCoupon' },
+    { header: '参与率', key: 'participationRate' },
+    { header: '行权汇率', key: 'strikeRate' },
+    { header: '存入币种', key: 'depositCurrency' },
+    { header: '对手币种', key: 'altCurrency' },
+    { header: '年化收益(%)', key: 'coupon' },
+    { header: '监控下界', key: 'customLower' },
+    { header: '监控上界', key: 'customUpper' },
+    { header: '目标年化(%)', key: 'customYield' },
+  ],
+
+  // 中文类型 → key 反查
+  TYPE_REVERSE: {},
+
   TYPE_ICONS: {
     range_accumulate: '📊',
     knockout: '🚧',
@@ -25,6 +60,10 @@ const Products = {
   },
 
   init() {
+    // 构建 TYPE_REVERSE 反查表
+    for (const [k, v] of Object.entries(this.TYPE_LABELS)) {
+      this.TYPE_REVERSE[v] = k;
+    }
     this.bindEvents();
   },
 
@@ -67,6 +106,24 @@ const Products = {
         document.getElementById(paneId).classList.add('active');
       });
     });
+
+    // 导出 Excel
+    const exportBtn = document.getElementById('export-products-btn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => this.exportToExcel());
+    }
+
+    // 导入 Excel
+    const importBtn = document.getElementById('import-products-btn');
+    if (importBtn) {
+      importBtn.addEventListener('click', () => {
+        document.getElementById('product-file-input').click();
+      });
+    }
+    const fileInput = document.getElementById('product-file-input');
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => this.importFromExcel(e));
+    }
   },
 
   // ===== 渲染产品列表 =====
@@ -663,6 +720,163 @@ const Products = {
     this.render(this.currentPairId);
     document.getElementById('product-detail').innerHTML = '';
     App.toast('产品已删除');
+  },
+
+  // ===== Excel 导出 =====
+  exportToExcel() {
+    const products = Storage.getProducts();
+    if (products.length === 0) {
+      App.toast('没有产品可导出');
+      return;
+    }
+
+    // 构建 AOA (array of arrays) 数据
+    const headers = this.EXCEL_COLUMNS.map(c => c.header);
+    const rows = products.map(p => {
+      return this.EXCEL_COLUMNS.map(c => {
+        let val = p[c.key];
+        if (val == null || val === '') return '';
+        // 数字字段保持数值类型
+        const numKeys = ['amount', 'entryRate', 'rangeLower', 'rangeUpper', 'highCoupon',
+          'lowCoupon', 'knockoutLevel', 'knockoutCoupon', 'baseCoupon', 'floorRate',
+          'capRate', 'capCoupon', 'participationRate', 'strikeRate', 'coupon',
+          'customLower', 'customUpper', 'customYield'];
+        if (numKeys.includes(c.key) && val !== '') {
+          const n = parseFloat(val);
+          if (!isNaN(n)) return n;
+        }
+        // 产品类型：key → 中文
+        if (c.key === 'type') {
+          return this.TYPE_LABELS[val] || val;
+        }
+        return val;
+      });
+    });
+
+    const aoa = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // 设置列宽
+    ws['!cols'] = this.EXCEL_COLUMNS.map(c => ({ wch: Math.max(c.header.length * 2, 12) }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '理财产品');
+
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `理财产品_${date}.xlsx`);
+    App.toast(`已导出 ${products.length} 个产品`);
+  },
+
+  // ===== Excel 导入 =====
+  async importFromExcel(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = ''; // 重置，允许重复选同一文件
+
+    try {
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+
+      // 读取为 JSON 对象数组（用表头做 key）
+      const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (rawRows.length === 0) {
+        App.toast('Excel 中没有数据');
+        return;
+      }
+
+      // 构建表头 → key 的映射（支持中英文表头）
+      const headerMap = {};
+      const firstRow = rawRows[0];
+      for (const header of Object.keys(firstRow)) {
+        // 精确匹配
+        const col = this.EXCEL_COLUMNS.find(c => c.header === header);
+        if (col) {
+          headerMap[header] = col.key;
+          continue;
+        }
+        // 模糊匹配（去掉空格、括号内容）
+        const cleanHeader = header.replace(/[\s\(（].*$/, '').trim();
+        const col2 = this.EXCEL_COLUMNS.find(c => {
+          const ch = c.header.replace(/[\s\(（].*$/, '').trim();
+          return ch === cleanHeader;
+        });
+        if (col2) headerMap[header] = col2.key;
+      }
+
+      const existing = Storage.getProducts();
+      const existingKeys = new Set(existing.map(p => `${p.name}|${p.type}|${p.base}|${p.target}`));
+
+      let imported = 0;
+      let skipped = 0;
+      const errors = [];
+
+      for (let i = 0; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        const product = {};
+
+        for (const [header, value] of Object.entries(row)) {
+          const key = headerMap[header];
+          if (!key) continue;
+          // 产品类型：中文 → key
+          if (key === 'type') {
+            const typeKey = this.TYPE_REVERSE[value] || value;
+            product[key] = typeKey;
+          } else if (value instanceof Date) {
+            // 日期 → YYYY-MM-DD
+            product[key] = value.toISOString().slice(0, 10);
+          } else if (value === '' || value == null) {
+            product[key] = null;
+          } else {
+            product[key] = String(value).trim();
+          }
+        }
+
+        // 基本校验
+        if (!product.name || !product.type || !product.base || !product.target) {
+          errors.push(`第 ${i + 2} 行：缺少必填字段（名称/类型/基准货币/目标货币）`);
+          skipped++;
+          continue;
+        }
+
+        // 类型校验
+        if (!this.TYPE_LABELS[product.type]) {
+          errors.push(`第 ${i + 2} 行：未知产品类型 "${product.type}"`);
+          skipped++;
+          continue;
+        }
+
+        // 去重检测
+        const dupKey = `${product.name}|${product.type}|${product.base}|${product.target}`;
+        if (existingKeys.has(dupKey)) {
+          skipped++;
+          continue;
+        }
+        existingKeys.add(dupKey);
+
+        // 生成 id 并添加
+        product.id = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${imported}`;
+        product.createdAt = Date.now();
+        existing.push(product);
+        imported++;
+      }
+
+      if (imported > 0) {
+        Storage.saveProducts(existing);
+        this.render(this.currentPairId);
+      }
+
+      let msg = `导入 ${imported} 个产品`;
+      if (skipped > 0) msg += `，跳过 ${skipped} 个（重复或格式不符）`;
+      App.toast(msg);
+      if (errors.length > 0) {
+        console.warn('导入错误详情:', errors);
+      }
+    } catch (e) {
+      console.error('导入失败:', e);
+      App.toast('导入失败: ' + e.message);
+    }
   },
 
   escape(str) {

@@ -1047,6 +1047,32 @@ body {
   background: var(--accent-hover);
 }
 
+.sidebar-action-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.sidebar-action-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sidebar-action-btn:hover {
+  background: var(--bg-hover, rgba(0,0,0,0.05));
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ===== 理财产品卡片 ===== */
 .product-card {
   padding: 14px;
