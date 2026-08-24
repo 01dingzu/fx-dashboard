@@ -124,6 +124,12 @@ const Products = {
     if (fileInput) {
       fileInput.addEventListener('change', (e) => this.importFromExcel(e));
     }
+
+    // 下载标准模板
+    const templateBtn = document.getElementById('download-template-btn');
+    if (templateBtn) {
+      templateBtn.addEventListener('click', () => this.downloadTemplate());
+    }
   },
 
   // ===== 渲染产品列表 =====
@@ -720,6 +726,37 @@ const Products = {
     this.render(this.currentPairId);
     document.getElementById('product-detail').innerHTML = '';
     App.toast('产品已删除');
+  },
+
+  // ===== 下载标准模板 =====
+  downloadTemplate() {
+    const headers = this.EXCEL_COLUMNS.map(c => c.header);
+
+    // 每种产品类型一行示例
+    const examples = [
+      { name: '示例-区间累积', type: '区间累积型', base: 'USD', target: 'CNY', amount: 100000, currency: 'USD', entryRate: 7.15, startDate: '2026-01-15', endDate: '2026-04-15', rangeLower: 7.00, rangeUpper: 7.30, highCoupon: 5.5, lowCoupon: 1.5 },
+      { name: '示例-敲出型', type: '敲出型', base: 'EUR', target: 'USD', amount: 50000, currency: 'EUR', entryRate: 1.08, startDate: '2026-02-01', endDate: '2026-05-01', knockoutLevel: 1.12, knockoutDirection: 'up', knockoutCoupon: 0.5, baseCoupon: 6.0 },
+      { name: '示例-鲨鱼鳍', type: '鲨鱼鳍', base: 'USD', target: 'JPY', amount: 1000000, currency: 'USD', entryRate: 150, startDate: '2026-01-20', endDate: '2026-04-20', floorRate: 2.0, capRate: 160, capCoupon: 8.0, participationRate: 0.5 },
+      { name: '示例-双币理财', type: '双币理财', base: 'AUD', target: 'USD', amount: 20000, currency: 'AUD', entryRate: 0.65, startDate: '2026-03-01', endDate: '2026-06-01', strikeRate: 0.68, depositCurrency: 'AUD', altCurrency: 'USD', coupon: 4.0 },
+      { name: '示例-自定义', type: '自定义', base: 'USD', target: 'CNY', amount: 50000, currency: 'CNY', entryRate: 7.15, startDate: '2026-01-10', endDate: '2026-07-10', customLower: 6.90, customUpper: 7.40, customYield: 5.0 },
+    ];
+
+    const rows = examples.map(ex => {
+      return this.EXCEL_COLUMNS.map(c => {
+        const val = ex[c.key];
+        return val != null ? val : '';
+      });
+    });
+
+    const aoa = [headers, ...rows];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = this.EXCEL_COLUMNS.map(c => ({ wch: Math.max(c.header.length * 2, 12) }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '理财产品模板');
+
+    XLSX.writeFile(wb, '理财产品导入模板.xlsx');
+    App.toast('模板已下载，可查看表头和示例数据');
   },
 
   // ===== Excel 导出 =====

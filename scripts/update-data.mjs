@@ -220,11 +220,28 @@ async function updateIndices() {
 // 主源: Yahoo (XAUUSD=X 现货, 回退期货); 最新一天用 gold-api 现货价覆盖/补充
 
 const METALS_MAP = {
-  'metals-xau.json': { yahooSpot: 'XAUUSD=X', yahooFutures: 'GC=F', api: 'XAU' },
-  'metals-xag.json': { yahooSpot: 'XAGUSD=X', yahooFutures: 'SI=F', api: 'XAG' },
-  'metals-xpt.json': { yahooSpot: 'XPTUSD=X', yahooFutures: 'PL=F', api: 'XPT' },
-  'metals-xpd.json': { yahooSpot: 'XPDUSD=X', yahooFutures: 'PA=F', api: 'XPD' },
+  'metals-xau.json': { yahooSpot: 'XAUUSD=X', yahooFutures: 'GC=F', api: 'XAU', tdSymbol: 'XAU/USD' },
+  'metals-xag.json': { yahooSpot: 'XAGUSD=X', yahooFutures: 'SI=F', api: 'XAG', tdSymbol: 'XAG/USD' },
+  'metals-xpt.json': { yahooSpot: 'XPTUSD=X', yahooFutures: 'PL=F', api: 'XPT', tdSymbol: 'XPT/USD' },
+  'metals-xpd.json': { yahooSpot: 'XPDUSD=X', yahooFutures: 'PA=F', api: 'XPD', tdSymbol: 'XPD/USD' },
 };
+
+const TD_API_KEY = '4f4e965acd514b20b30af066c1830ffa';
+
+async function fetchTwelveDataHistory(tdSymbol, outputsize = 500) {
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(tdSymbol)}&interval=1day&outputsize=${outputsize}&apikey=${TD_API_KEY}`;
+  const data = await (await fetchWithRetry(url)).json();
+  if (data.code === 404 || data.status === 'error') {
+    throw new Error(`Twelve Data: ${data.message || '不可用'}`);
+  }
+  if (!data.values || !Array.isArray(data.values)) {
+    throw new Error('Twelve Data: 无数据');
+  }
+  return data.values.map(v => ({
+    date: v.datetime,
+    value: parseFloat(v.close)
+  })).reverse(); // Twelve Data 返回最新在前，反转为升序
+}
 
 async function fetchGoldApiPrice(symbol) {
   const data = await (await fetchWithRetry(`https://api.gold-api.com/price/${symbol}`)).json();
@@ -251,6 +268,17 @@ async function updateMetalsHistory() {
         }
       }
       series = normalizeSeries(series);
+
+      // Yahoo 不可用时尝试 Twelve Data
+      if (series.length === 0 && cfg.tdSymbol) {
+        try {
+          series = await fetchTwelveDataHistory(cfg.tdSymbol);
+          source = `Twelve Data ${cfg.tdSymbol}`;
+          console.log(`  → ${cfg.api} 从 Twelve Data 获取 ${series.length} 条历史`);
+        } catch (e) {
+          console.warn(`  ! Twelve Data ${cfg.tdSymbol} 不可用: ${e.message}`);
+        }
+      }
 
       // Yahoo 完全失败时，读取旧文件做增量（每日追加 gold-api 现价）
       if (series.length === 0 && existsSync(join(DATA_DIR, filename))) {
