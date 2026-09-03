@@ -129,11 +129,13 @@ async function updateRmbRates() {
 
 // ---------- 2. 美国国债收益率 (treasury-us-*.json) ----------
 // 格式: [{date, value}]  value 单位 %
+// 主源: 美国财政部官方每日收益率曲线 CSV（含 2Y/10Y/30Y，覆盖整年，可回填缺口）
+// 备源: FRED fredgraph.csv（2026-08 起对本客户端静默封锁返回空体，仅作兜底）
 
 const TREASURY_MAP = {
-  'treasury-us-10y.json': 'DGS10',
-  'treasury-us-2y.json': 'DGS2',
-  'treasury-us-30y.json': 'DGS30',
+  'treasury-us-10y.json': { fred: 'DGS10', column: '10 Yr' },
+  'treasury-us-2y.json': { fred: 'DGS2', column: '2 Yr' },
+  'treasury-us-30y.json': { fred: 'DGS30', column: '30 Yr' },
 };
 
 /** 裁剪序列到最近 N 天 */
@@ -142,22 +144,82 @@ function trimSeries(arr, days = HISTORY_DAYS) {
   return arr.filter(item => item.date >= cutoff);
 }
 
+/** 拉取美国财政部官方收益率曲线指定列序列（当年 + 上一年，可回填缺口） */
+async function fetchTreasurySeries(columnName) {
+  const years = [new Date().getFullYear(), new Date().getFullYear() - 1];
+  const out = [];
+  for (const year of years) {
+    try {
+      const url = `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${year}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${year}&page&_format=csv`;
+      const csv = await (await fetchWithRetry(url)).text();
+      if (!csv.trim()) throw new Error('空响应');
+      const lines = csv.trim().split('\n');
+      const header = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const colIdx = header.indexOf(columnName);
+      if (colIdx < 0) throw new Error(`缺少列 ${columnName}`);
+      for (const line of lines.slice(1)) {
+        if (!line.trim()) continue;
+        const cells = line.split(',');
+        const [m, d, y] = cells[0].trim().split('/');
+        if (!m || !d || !y) continue;
+        const v = parseFloat(cells[colIdx]);
+        if (isNaN(v)) continue;
+        out.push({ date: `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`, value: v });
+      }
+    } catch (e) {
+      console.warn(`  ! treasury.gov ${year} 年数据获取失败: ${e.message}`);
+    }
+  }
+  if (out.length === 0) throw new Error('treasury.gov 两年均无有效数据');
+  return out;
+}
+
 async function updateTreasury() {
-  console.log('[2/5] 美国国债收益率 (FRED)...');
-  for (const [filename, seriesId] of Object.entries(TREASURY_MAP)) {
-    const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}`;
-    const csv = await (await fetchWithRetry(url)).text();
-    const lines = csv.trim().split('\n').slice(1); // 跳过表头
-    const series = trimSeries(normalizeSeries(
-      lines.map(line => {
-        const [date, raw] = line.split(',');
-        const value = parseFloat(raw);
-        return { date, value: isNaN(value) ? null : value }; // FRED 用 . 表示缺失
-      })
-    ));
-    if (series.length === 0) throw new Error(`${filename} 无有效数据`);
+  console.log('[2/5] 美国国债收益率 (treasury.gov 官方, FRED 兜底)...');
+  for (const [filename, cfg] of Object.entries(TREASURY_MAP)) {
+    let series = [];
+    let source = '';
+    try {
+      // 主源: treasury.gov 官方 CSV（覆盖整年，可回填断更缺口）
+      series = await fetchTreasurySeries(cfg.column);
+      source = 'treasury.gov';
+    } catch (e) {
+      console.warn(`  ! treasury.gov 不可用 (${e.message})，尝试 FRED 兜底`);
+      try {
+        const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${cfg.fred}`;
+        const csv = await (await fetchWithRetry(url)).text();
+        const lines = csv.trim().split('\n').slice(1);
+        series = trimSeries(normalizeSeries(
+          lines.map(line => {
+            const [date, raw] = line.split(',');
+            const value = parseFloat(raw);
+            return { date, value: isNaN(value) ? null : value };
+          })
+        ));
+        source = 'FRED';
+      } catch (e2) {
+        console.warn(`  ! FRED 也不可用: ${e2.message}`);
+        series = [];
+      }
+    }
+
+    // 合并已有文件的历史数据（保留 2 年窗口）
+    if (series.length > 0 && existsSync(join(DATA_DIR, filename))) {
+      try {
+        const old = JSON.parse(readFileSync(join(DATA_DIR, filename), 'utf8'));
+        series = [...old, ...series];
+        if (source !== 'FRED') source += '+已有文件合并';
+      } catch {}
+    }
+
+    series = trimSeries(normalizeSeries(series));
+    if (series.length === 0) {
+      console.warn(`  ! ${filename} 无有效数据，保留旧文件`);
+      continue;
+    }
     writeJsonIfChanged(filename, series);
-    console.log(`  ${seriesId}: ${series.length} 条, 最新: ${series[series.length - 1].date} = ${series[series.length - 1].value}`);
+    const last = series[series.length - 1];
+    console.log(`  ${filename} (${source}): ${series.length} 条, 最新: ${last.date} = ${last.value}`);
   }
 }
 
@@ -356,11 +418,14 @@ async function main() {
     console.log('');
   }
 
-  if (failures.length > 0) {
-    console.warn(`失败任务: ${failures.join(', ')}`);
+  // 仅当全部任务失败时才以非零退出；部分失败时正常退出，
+  // 让 Actions 的 commit 步骤仍能提交成功更新的数据源（否则一个源挂掉全看板断更）。
+  if (failures.length === tasks.length) {
+    console.error('全部数据源更新失败');
     process.exitCode = 1;
   } else {
-    console.log('全部数据源更新完成');
+    if (failures.length > 0) console.warn(`部分数据源失败(已跳过): ${failures.join(', ')}`);
+    console.log('数据更新完成');
   }
 }
 

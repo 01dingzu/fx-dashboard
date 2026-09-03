@@ -29,6 +29,7 @@ jobs:
         run: node scripts/update-data.mjs
 
       - name: Commit and push if changed
+        if: always() # 更新脚本部分失败也要提交已成功的源，避免全看板断更
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
