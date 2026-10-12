@@ -94,6 +94,16 @@ function mergeByDate(oldArr, incoming) {
   return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** 读回已落盘的序列条数（日志用：源条数 ≠ 落盘条数，窗口裁剪后会变少） */
+function storedSeriesLen(filename) {
+  const p = join(DATA_DIR, filename);
+  if (!existsSync(p)) return 0;
+  try {
+    const arr = JSON.parse(readFileSync(p, 'utf8'));
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch { return 0; }
+}
+
 /**
  * 带「缩水保护」的序列写入。
  *
@@ -401,7 +411,9 @@ async function updateIndices() {
       if (series.length === 0) throw new Error('空数据');
       writeSeriesGuarded(filename, series);
       const last = series[series.length - 1];
-      console.log(`  ${filename} (${source || cfg.yahoo}): ${series.length} 条, 最新: ${last.date} = ${last.value}`);
+      const stored = storedSeriesLen(filename);
+      const note = stored === series.length ? '' : ` → 文件 ${stored} 条(窗口裁剪)`;
+      console.log(`  ${filename} (${source || cfg.yahoo}): 源 ${series.length} 条${note}, 最新: ${last.date} = ${last.value}`);
       ok++;
     } catch (e) {
       console.warn(`  ! ${filename} (${cfg.yahoo}) 获取失败: ${e.message}，保留旧文件`);
