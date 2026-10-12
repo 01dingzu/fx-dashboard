@@ -35,7 +35,8 @@ page.on('response', (r) => {
   const u = r.url();
   const st = r.status();
   if (st >= 400) fails.push(`${st} ${u}`);
-  if (/\.json(\?|$)/.test(u) && !/01dingzu\.github\.io/.test(u) && !/_probe=1/.test(u)) reqs.push(`${st} ${u.slice(0, 220)}`);
+  // 应用自身对 data/*.json 的请求（第三方 API 的 URL 不以 .json 结尾，天然不计入）
+  if (/\/data\/[^/]+\.json(\?|$)/.test(u) && !/_probe=1/.test(u)) reqs.push(`${st} ${u.slice(0, 220)}`);
 });
 page.on('requestfailed', (r) => fails.push(`REQFAIL ${r.failure()?.errorText} ${r.url()}`));
 
@@ -98,7 +99,7 @@ console.log('--- 失败请求 (' + fails.length + ') ---');
 fails.slice(0, 20).forEach((f) => console.log('  ' + f));
 console.log('--- 页面报错 (' + errs.length + ') ---');
 errs.slice(0, 12).forEach((e) => console.log('  ' + e));
-console.log('--- 外部 JSON 请求 (' + reqs.length + ') ---');
+console.log('--- data/*.json 请求 (' + reqs.length + ') ---');
 reqs.forEach((r) => console.log('  ' + r));
 
 // 同一静态文件的并发次数：>1 说明缓存被击穿（慢网络下会互相抢带宽、一起超时）。

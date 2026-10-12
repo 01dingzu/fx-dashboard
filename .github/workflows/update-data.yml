@@ -28,6 +28,12 @@ jobs:
       - name: Update data files
         run: node scripts/update-data.mjs
 
+      - name: Sanity check data files
+        # 记录数异常偏少（<50）说明某个源退化了。故意不加 continue-on-error：
+        # 让任务变红以便在 GitHub 上被看到；但下面的提交步骤是 if: always()，
+        # 已成功的数据仍会提交，不会因为一个源出问题而全看板断更。
+        run: node scripts/data-stats.mjs
+
       - name: Commit and push if changed
         if: always() # 更新脚本部分失败也要提交已成功的源，避免全看板断更
         run: |
