@@ -52,7 +52,10 @@ const App = {
         changeEl.className = 'rate-change flat';
       }
     } else {
-      rateEl.textContent = '加载中...';
+      // 取数已回来却仍然没有 = 失败，如实说明，别继续显示「加载中」糊弄人
+      const why = (typeof Adapters !== 'undefined' && Adapters.failReasons[assetId]) || '';
+      rateEl.textContent = Dashboard.dataLoaded ? '获取失败' : '加载中...';
+      if (Dashboard.dataLoaded && why) rateEl.title = why;
       changeEl.textContent = '--';
       changeEl.className = 'rate-change flat';
     }
@@ -65,7 +68,8 @@ const App = {
       const history = await Adapters.getHistory(asset, startDate, endDate);
 
       if (history.series.length === 0) {
-        App.toast('暂无历史数据');
+        const why = Adapters.failReasons[assetId];
+        App.toast(why ? `历史数据取不到（${why}）` : '暂无历史数据');
         return;
       }
 

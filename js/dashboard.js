@@ -3,11 +3,18 @@
  * 支持多标的类型: 汇率/贵金属/国债
  */
 
+/** 转义后塞进 HTML 属性（错误信息里可能带引号/尖括号，直接拼会破坏标签） */
+function escAttr(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
 const Dashboard = {
   assets: [],
   latestData: {},
   selectedId: null,
   currencyList: {},
+  /** 首屏取数是否已回来。用来区分「还在加载」与「取不到」 */
+  dataLoaded: false,
 
   async init() {
     this.bindEvents();
@@ -65,11 +72,13 @@ const Dashboard = {
 
   bindEvents() {
     document.getElementById('refresh-btn').addEventListener('click', () => {
-      Adapters.cache.clear();
+      Adapters.clearCache();
       API.cache.clear();
       this.render();
       App.toast('数据已刷新');
     });
+
+    document.getElementById('data-status-retry')?.addEventListener('click', () => this.retryAll());
 
     document.getElementById('add-pair-btn').addEventListener('click', () => {
       this.showAddModal();
@@ -119,6 +128,7 @@ const Dashboard = {
     this.assets = Storage.getAssets();
     document.getElementById('pair-count').textContent = this.assets.length;
 
+    this.dataLoaded = false;   // 先按「加载中」渲染，取数回来后再区分成功/失败
     this.renderAssetList();
     await this.loadAllLatest();
 
@@ -204,8 +214,12 @@ const Dashboard = {
       items.forEach((asset, index) => {
         const data = this.latestData[asset.id];
         const isActive = asset.id === this.selectedId;
+        // 取数已回来却仍没有数据 = 失败。旧版把这种情况也画成「加载中...」，
+        // 于是一次网络抖动/发布窗口就变成「整个看板没数据」，且永不恢复。
+        const failed = !data && this.dataLoaded;
+        const reason = failed ? (Adapters.failReasons[asset.id] || '数据源无返回') : '';
 
-        let valueText = '加载中...';
+        let valueText = failed ? '获取失败' : '加载中...';
         let changeText = '';
         let changeClass = 'flat';
 
@@ -219,7 +233,7 @@ const Dashboard = {
         }
 
         html += `
-          <div class="pair-card ${isActive ? 'active' : ''}" data-id="${asset.id}" draggable="true">
+          <div class="pair-card ${isActive ? 'active' : ''}${failed ? ' failed' : ''}" data-id="${asset.id}" draggable="true"${reason ? ` title="取数失败：${escAttr(reason)}"` : ''}>
             <div class="pair-card-drag" title="拖拽排序">
               <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
                 <circle cx="2" cy="2" r="1.2"/><circle cx="8" cy="2" r="1.2"/>
@@ -232,6 +246,7 @@ const Dashboard = {
               <div class="pair-card-rate">${valueText}</div>
             </div>
             <div class="pair-card-change ${changeClass}">${changeText}</div>
+            ${failed ? `<button class="pair-card-retry" data-retry="${asset.id}" title="重新获取这个标的">↻</button>` : ''}
             <button class="pair-card-delete" data-delete="${asset.id}" title="删除">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"/>
@@ -250,7 +265,8 @@ const Dashboard = {
     // 绑定事件
     list.querySelectorAll('.pair-card').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.pair-card-delete') || e.target.closest('.pair-card-drag')) return;
+        if (e.target.closest('.pair-card-delete') || e.target.closest('.pair-card-drag')
+          || e.target.closest('.pair-card-retry')) return;
         this.selectAsset(card.dataset.id);
       });
     });
@@ -259,6 +275,14 @@ const Dashboard = {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.removeAsset(btn.dataset.delete);
+      });
+    });
+
+    // 取数失败的标的：单独重试，不用整页刷新
+    list.querySelectorAll('.pair-card-retry').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.reloadAsset(btn.dataset.retry);
       });
     });
 
@@ -354,8 +378,13 @@ const Dashboard = {
   },
 
   async loadAllLatest() {
-    if (this.assets.length === 0) return;
+    if (this.assets.length === 0) {
+      this.dataLoaded = true;
+      this.renderDataStatusBar();
+      return;
+    }
     this.latestData = await Adapters.getAllLatest(this.assets);
+    this.dataLoaded = true;
     this.renderAssetList();
 
     // 更新最后更新时间
@@ -363,6 +392,54 @@ const Dashboard = {
     if (latestEntry) {
       document.getElementById('last-update').textContent = `数据日期: ${latestEntry.date}`;
     }
+    this.renderDataStatusBar();
+  },
+
+  /** 单个标的重新取数（失败卡片上的 ↻） */
+  async reloadAsset(id) {
+    const asset = this.assets.find(a => a.id === id);
+    if (!asset) return;
+    Adapters.clearCache();
+    try {
+      const fresh = await Adapters.getLatest(asset);
+      this.latestData[id] = fresh;
+      if (!fresh) this.latestData[id] = null;
+    } catch (e) {
+      console.error(`重试 ${asset.name} 失败:`, e);
+      this.latestData[id] = null;
+    }
+    this.renderAssetList();
+    this.renderDataStatusBar();
+    if (id === this.selectedId) await App.loadAssetDetail(id, Storage.getSettings().timeRange);
+  },
+
+  /** 全部重新取数（状态条上的「重新获取」） */
+  async retryAll() {
+    Adapters.clearCache();
+    API.cache.clear();
+    this.dataLoaded = false;
+    this.renderAssetList();
+    await this.loadAllLatest();
+    App.toast('已重新获取');
+    if (this.selectedId) await App.loadAssetDetail(this.selectedId, Storage.getSettings().timeRange);
+  },
+
+  /**
+   * 取数状态条：有标的取不到时出现，写明原因并给一键重试。
+   * 以前失败是静默的（卡片停在「加载中...」），用户看不出是没数据还是没加载完。
+   */
+  renderDataStatusBar() {
+    const bar = document.getElementById('data-status');
+    if (!bar) return;
+    const failed = this.assets.filter(a => !this.latestData[a.id]);
+    const show = this.dataLoaded && failed.length > 0;
+    bar.hidden = !show;
+    if (!show) return;
+
+    const names = failed.slice(0, 4).map(a => a.name || a.code).join('、');
+    const tail = failed.length > 4 ? ` 等 ${failed.length} 个` : '';
+    document.getElementById('data-status-text').textContent =
+      `${failed.length} 个标的取数失败：${names}${tail}。数据文件每天更新，刚发布时可能短暂读不到，点右侧重试通常即可恢复。`;
   },
 
   // ===== 添加面板 =====

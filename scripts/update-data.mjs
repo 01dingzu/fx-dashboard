@@ -4,7 +4,7 @@
  * 生成/更新 data/ 目录下的静态 JSON 文件（供前端 data-adapters.js 消费）:
  *   safe-rmb-rates.json      人民币汇率（Frankfurter/ECB 参考汇率，见下方说明）
  *   treasury-us-*.json       美国国债收益率（FRED）
- *   index-*.json             全球股市指数（Yahoo Finance）
+ *   index-*.json             全球股市指数（A 股走东方财富，其余 Yahoo Finance）
  *   metals-*.json            贵金属历史（Yahoo Finance + gold-api 最新价）
  *   metals-current.json      贵金属现价（gold-api.com）
  *
@@ -19,10 +19,11 @@
 
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '..', 'data');
+// 允许用 FX_DATA_DIR 指向别处：测试脚本靠它把写入引到临时目录，不碰真实 data/
+const DATA_DIR = process.env.FX_DATA_DIR || join(__dirname, '..', 'data');
 const HISTORY_DAYS = 730; // 2 年历史（看板最长 1 年 + 余量）
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -81,6 +82,62 @@ function writeJsonIfChanged(filename, data) {
   return true;
 }
 
+/** 按 date 去重合并（新数据覆盖同日旧值），保持升序。多字段条目（如汇率）也不会丢字段 */
+function mergeByDate(oldArr, incoming) {
+  const map = new Map();
+  for (const it of oldArr) if (it && it.date) map.set(it.date, it);
+  for (const it of incoming) {
+    if (!it || !it.date) continue;
+    const prev = map.get(it.date);
+    map.set(it.date, prev ? { ...prev, ...it } : it);
+  }
+  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * 带「缩水保护」的序列写入。
+ *
+ * 背景: 数据源会间歇性"退化"——Yahoo 对 A 股指数（如 000300.SS）时不时只返回
+ * 1 个点（最新快照），旧写法直接覆盖，于是 index-csi300.json 从 443 条被写成
+ * 1 条，并连续三周多没人察觉（看板上表现为该标的曲线空白）。
+ *
+ * 策略: 新数据条数不足旧文件一半、且旧文件本身够长时，判定为源退化，
+ *       只接受比旧文件更新的日期，绝不覆盖任何历史点位；其余情况正常合并。
+ */
+function writeSeriesGuarded(filename, incoming, opts = {}) {
+  const { minOld = 60, minRatio = 0.5, trim = true } = opts;
+  const path = join(DATA_DIR, filename);
+  let old = [];
+  if (existsSync(path)) {
+    try { old = JSON.parse(readFileSync(path, 'utf8')); } catch { old = []; }
+  }
+  if (!Array.isArray(old)) old = [];
+  if (!Array.isArray(incoming) || incoming.length === 0) {
+    console.warn(`  ! ${filename} 无新数据，保留旧文件`);
+    return false;
+  }
+
+  let payload = incoming;
+  if (old.length >= minOld && incoming.length < old.length * minRatio) {
+    const lastOldDate = old[old.length - 1]?.date || '';
+    const fresh = incoming.filter(it => it.date > lastOldDate);
+    console.warn(
+      `  ! ${filename} 数据源仅返回 ${incoming.length} 条（已有 ${old.length} 条），判定源退化：` +
+      `只追加 ${fresh.length} 条新日期，历史点位全部保留`,
+    );
+    payload = fresh;
+  }
+
+  const merged = mergeByDate(old, payload);
+  const finalArr = trim ? trimSeries(merged) : merged;
+  if (finalArr.length === 0) {
+    console.warn(`  ! ${filename} 合并后为空，保留旧文件`);
+    return false;
+  }
+  writeJsonIfChanged(filename, finalArr);
+  return true;
+}
+
 /** 去重 + 按日期升序 */
 function normalizeSeries(arr) {
   const map = new Map();
@@ -123,7 +180,7 @@ async function updateRmbRates() {
   entries.sort((a, b) => a.date.localeCompare(b.date));
 
   if (entries.length === 0) throw new Error('无有效数据');
-  writeJsonIfChanged('safe-rmb-rates.json', entries);
+  writeSeriesGuarded('safe-rmb-rates.json', entries);
   console.log(`  共 ${entries.length} 天, 最新: ${entries[entries.length - 1].date}`);
 }
 
@@ -226,22 +283,44 @@ async function updateTreasury() {
 // ---------- 3. 股市指数 (index-*.json) ----------
 // 格式: [{date, value}]
 
+// cn 字段 = 东方财富 secid：沪市前缀 1. / 深市前缀 0.
+// A 股指数走东财（权威且稳定），Yahoo 仅作兜底；其余指数只有 Yahoo。
 const INDEX_MAP = {
-  'index-gspc.json': '^GSPC',    // 标普500
-  'index-ixic.json': '^IXIC',    // 纳斯达克综合
-  'index-dji.json': '^DJI',      // 道琼斯工业
-  'index-rut.json': '^RUT',      // 罗素2000
-  'index-ssec.json': '000001.SS', // 上证综指
-  'index-szse.json': '399001.SZ', // 深证成指
-  'index-csi300.json': '000300.SS', // 沪深300
-  'index-hsi.json': '^HSI',      // 恒生指数
-  'index-ftse.json': '^FTSE',    // 富时100
-  'index-gdaxi.json': '^GDAXI',  // 德国DAX
-  'index-fchi.json': '^FCHI',    // 法国CAC 40
-  'index-n225.json': '^N225',    // 日经225
-  'index-ks11.json': '^KS11',    // 韩国KOSPI
-  'index-vix.json': '^VIX',      // VIX波动率
+  'index-gspc.json': { yahoo: '^GSPC' },                        // 标普500
+  'index-ixic.json': { yahoo: '^IXIC' },                        // 纳斯达克综合
+  'index-dji.json': { yahoo: '^DJI' },                          // 道琼斯工业
+  'index-rut.json': { yahoo: '^RUT' },                          // 罗素2000
+  'index-ssec.json': { yahoo: '000001.SS', cn: '1.000001' },    // 上证综指
+  'index-szse.json': { yahoo: '399001.SZ', cn: '0.399001' },    // 深证成指
+  'index-csi300.json': { yahoo: '000300.SS', cn: '1.000300' },  // 沪深300
+  'index-hsi.json': { yahoo: '^HSI' },                          // 恒生指数
+  'index-ftse.json': { yahoo: '^FTSE' },                        // 富时100
+  'index-gdaxi.json': { yahoo: '^GDAXI' },                      // 德国DAX
+  'index-fchi.json': { yahoo: '^FCHI' },                        // 法国CAC 40
+  'index-n225.json': { yahoo: '^N225' },                        // 日经225
+  'index-ks11.json': { yahoo: '^KS11' },                        // 韩国KOSPI
+  'index-vix.json': { yahoo: '^VIX' },                          // VIX波动率
 };
+
+/** 2 年窗口下的正常条数下限；低于它说明数据源退化了 */
+const INDEX_MIN_OK = 120;
+
+/**
+ * 东方财富日 K（A 股指数权威源）。
+ * Yahoo 对 A 股指数会间歇性只回 1 个点——index-csi300.json 就这样被写成 1 条并连续
+ * 三周多无人察觉。东财返回格式最省：klines: ["日期,收盘", ...]（升序）。
+ */
+async function fetchEastmoneyDaily(secid, limit = 500) {
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get`
+    + `?secid=${secid}&fields1=f1,f2,f3&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=${limit}`;
+  const data = await (await fetchWithRetry(url)).json();
+  const klines = data?.data?.klines;
+  if (!Array.isArray(klines) || klines.length === 0) throw new Error('东财无数据');
+  return klines.map((k) => {
+    const [date, close] = k.split(',');
+    return { date, value: parseFloat(close) };
+  });
+}
 
 async function fetchYahooDaily(symbol, range = '2y') {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`;
@@ -259,18 +338,49 @@ async function fetchYahooDaily(symbol, range = '2y') {
 }
 
 async function updateIndices() {
-  console.log('[3/5] 股市指数 (Yahoo Finance)...');
+  console.log('[3/5] 股市指数 (A 股走东财, 其余 Yahoo Finance)...');
   let ok = 0, fail = 0;
-  for (const [filename, symbol] of Object.entries(INDEX_MAP)) {
+  for (const [filename, cfg] of Object.entries(INDEX_MAP)) {
     try {
-      const series = normalizeSeries(await fetchYahooDaily(symbol));
+      let series = [];
+      let source = '';
+
+      // A 股指数优先东财（Yahoo 对 000300.SS 之类会只回 1 个点）
+      if (cfg.cn) {
+        try {
+          const cn = normalizeSeries(await fetchEastmoneyDaily(cfg.cn));
+          if (cn.length >= INDEX_MIN_OK) {
+            series = cn;
+            source = `东财 ${cfg.cn}`;
+          } else {
+            console.warn(`  ! 东财 ${cfg.cn} 仅 ${cn.length} 条，改用 Yahoo`);
+          }
+        } catch (e) {
+          console.warn(`  ! 东财 ${cfg.cn} 不可用: ${e.message}，改用 Yahoo`);
+        }
+      }
+
+      // Yahoo：非 A 股指数的主源，也是 A 股指数退化时的兜底
+      if (series.length < INDEX_MIN_OK) {
+        try {
+          const yh = normalizeSeries(await fetchYahooDaily(cfg.yahoo));
+          if (yh.length > series.length) {
+            if (series.length > 0) console.log(`  → ${filename} 改用 Yahoo ${cfg.yahoo} 的 ${yh.length} 条`);
+            else source = `Yahoo ${cfg.yahoo}`;
+            series = yh;
+          }
+        } catch (e) {
+          console.warn(`  ! Yahoo ${cfg.yahoo} 失败: ${e.message}`);
+        }
+      }
+
       if (series.length === 0) throw new Error('空数据');
-      writeJsonIfChanged(filename, series);
+      writeSeriesGuarded(filename, series);
       const last = series[series.length - 1];
-      console.log(`  ${symbol}: ${series.length} 条, 最新: ${last.date} = ${last.value}`);
+      console.log(`  ${filename} (${source || cfg.yahoo}): ${series.length} 条, 最新: ${last.date} = ${last.value}`);
       ok++;
     } catch (e) {
-      console.warn(`  ! ${filename} (${symbol}) 获取失败: ${e.message}，保留旧文件`);
+      console.warn(`  ! ${filename} (${cfg.yahoo}) 获取失败: ${e.message}，保留旧文件`);
       fail++;
     }
   }
@@ -365,7 +475,7 @@ async function updateMetalsHistory() {
       }
 
       if (series.length === 0) throw new Error('空数据');
-      writeJsonIfChanged(filename, trimSeries(series));
+      writeSeriesGuarded(filename, series);
       const last = series[series.length - 1];
       console.log(`  ${cfg.api}: ${series.length} 条 (${source}), 最新: ${last.date} = ${last.value}`);
     } catch (e) {
@@ -429,4 +539,18 @@ async function main() {
   }
 }
 
-main();
+// 直接 `node scripts/update-data.mjs` 才跑主流程；被 import 时只导出纯函数，
+// 这样 scripts/test-update-data.mjs 能直接测「缩水保护」而不复刻一份实现。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
+
+export {
+  DATA_DIR,
+  writeSeriesGuarded,
+  writeJsonIfChanged,
+  mergeByDate,
+  normalizeSeries,
+  trimSeries,
+  fetchEastmoneyDaily,
+};

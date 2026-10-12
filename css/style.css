@@ -309,6 +309,67 @@ body {
   color: var(--up);
 }
 
+/* 取数失败的标的：值显示「获取失败」，并给一个就地重试按钮 */
+.pair-card.failed .pair-card-rate {
+  color: #f59e0b;
+}
+
+.pair-card-retry {
+  background: transparent;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  color: #f59e0b;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  margin-left: 4px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.pair-card-retry:hover {
+  background: #f59e0b;
+  color: var(--bg);
+}
+
+/* ===== 取数状态条 ===== */
+.data-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.data-status[hidden] { display: none; }
+
+.data-status-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.data-status-retry {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  color: #fbbf24;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 12px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.data-status-retry:hover {
+  background: #f59e0b;
+  color: var(--bg);
+}
+
 /* ===== 内容区 ===== */
 .content {
   flex: 1;
