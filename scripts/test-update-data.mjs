@@ -16,7 +16,7 @@ import path from 'node:path';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'fxdata-test-'));
 process.env.FX_DATA_DIR = TMP;   // 必须早于 import：DATA_DIR 在模块加载时求值
 
-const { writeSeriesGuarded, mergeByDate, normalizeSeries, fetchEastmoneyDaily } =
+const { writeSeriesGuarded, mergeByDate, normalizeSeries, fetchEastmoneyDaily, fetchTencentDaily, INDEX_MAP } =
   await import('./update-data.mjs');
 
 let passed = 0, failed = 0;
@@ -138,6 +138,50 @@ console.log('— 东财响应解析（替身，不联网）—');
   } finally {
     globalThis.fetch = realFetch;
   }
+}
+
+console.log('— 腾讯响应解析（替身，不联网）—');
+{
+  const realFetch = globalThis.fetch;
+  // 真实返回形如 data.sh000300.day = [[日期, 开, 收, 高, 低, 量], ...]
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      data: {
+        sh000300: {
+          day: [
+            ['2026-10-10', '4200.00', '4001.50', '4230.00', '3990.00', '123456'],
+            ['2026-10-12', '4305.91', '4287.98', '4334.29', '4279.71', '180717331'],
+          ],
+        },
+      },
+    }),
+  });
+  try {
+    const parsed = await fetchTencentDaily('sh000300', 2);
+    t('day 数组取第 3 列收盘价', parsed.length === 2 && parsed[1].date === '2026-10-12' && parsed[1].value === 4287.98,
+      JSON.stringify(parsed));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: { sh000300: {} } }) });
+  try {
+    let threw = false;
+    try { await fetchTencentDaily('sh000300', 2); } catch { threw = true; }
+    t('腾讯无数据时抛错（走兜底而不是写空文件）', threw);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+console.log('— A 股指数必须配国内源 —');
+{
+  // GitHub Runner 实测连不上东财，腾讯是沪深300 唯一的国内兜底；
+  // 漏配 tx 会让该指数在 CI 里静默停更（守卫只保证不被写坏，补不上新数据）。
+  const cnIdx = Object.entries(INDEX_MAP).filter(([, c]) => c.cn);
+  t('A 股指数都配了腾讯兜底源', cnIdx.length >= 3 && cnIdx.every(([, c]) => !!c.tx),
+    cnIdx.map(([f, c]) => `${f}:${c.tx || '缺'}`).join(' '));
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });

@@ -284,15 +284,18 @@ async function updateTreasury() {
 // 格式: [{date, value}]
 
 // cn 字段 = 东方财富 secid：沪市前缀 1. / 深市前缀 0.
-// A 股指数走东财（权威且稳定），Yahoo 仅作兜底；其余指数只有 Yahoo。
+// tx 字段 = 腾讯行情代码：沪市 sh / 深市 sz
+// A 股指数按 东财 → 腾讯 → Yahoo 顺序取，前两个是国内源、数据完整，
+// Yahoo 对 000300.SS 之类会间歇性只回 1 个点，只当最后兜底。
+// 实测 GitHub Runner 访问不到东财（fetch failed），所以腾讯这一级是必需的，不是锦上添花。
 const INDEX_MAP = {
   'index-gspc.json': { yahoo: '^GSPC' },                        // 标普500
   'index-ixic.json': { yahoo: '^IXIC' },                        // 纳斯达克综合
   'index-dji.json': { yahoo: '^DJI' },                          // 道琼斯工业
   'index-rut.json': { yahoo: '^RUT' },                          // 罗素2000
-  'index-ssec.json': { yahoo: '000001.SS', cn: '1.000001' },    // 上证综指
-  'index-szse.json': { yahoo: '399001.SZ', cn: '0.399001' },    // 深证成指
-  'index-csi300.json': { yahoo: '000300.SS', cn: '1.000300' },  // 沪深300
+  'index-ssec.json': { yahoo: '000001.SS', cn: '1.000001', tx: 'sh000001' },    // 上证综指
+  'index-szse.json': { yahoo: '399001.SZ', cn: '0.399001', tx: 'sz399001' },    // 深证成指
+  'index-csi300.json': { yahoo: '000300.SS', cn: '1.000300', tx: 'sh000300' },  // 沪深300
   'index-hsi.json': { yahoo: '^HSI' },                          // 恒生指数
   'index-ftse.json': { yahoo: '^FTSE' },                        // 富时100
   'index-gdaxi.json': { yahoo: '^GDAXI' },                      // 德国DAX
@@ -322,6 +325,22 @@ async function fetchEastmoneyDaily(secid, limit = 500) {
   });
 }
 
+/**
+ * 腾讯行情日 K（A 股指数第二源）。
+ * 存在的理由：实测 GitHub Runner 访问不到东财（fetch failed），而 Yahoo 对
+ * 000300.SS 只回 1 个点。没有这一级，沪深300 在 CI 里就永远补不上新数据。
+ * 返回 data[symbol].day（或 qfqday）：[[日期, 开, 收, 高, 低, 量], ...]（升序）。
+ */
+async function fetchTencentDaily(txSymbol, limit = 500) {
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get`
+    + `?param=${txSymbol},day,,,${limit},`;
+  const data = await (await fetchWithRetry(url, { headers: { Referer: 'https://gu.qq.com/' } })).json();
+  const node = data?.data?.[txSymbol];
+  const rows = node?.day || node?.qfqday;
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('腾讯无数据');
+  return rows.map((r) => ({ date: String(r[0]), value: parseFloat(r[2]) }));
+}
+
 async function fetchYahooDaily(symbol, range = '2y') {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`;
   const data = await (await fetchWithRetry(url)).json();
@@ -338,25 +357,30 @@ async function fetchYahooDaily(symbol, range = '2y') {
 }
 
 async function updateIndices() {
-  console.log('[3/5] 股市指数 (A 股走东财, 其余 Yahoo Finance)...');
+  console.log('[3/5] 股市指数 (A 股走东财→腾讯, 其余 Yahoo Finance)...');
   let ok = 0, fail = 0;
   for (const [filename, cfg] of Object.entries(INDEX_MAP)) {
     try {
       let series = [];
       let source = '';
 
-      // A 股指数优先东财（Yahoo 对 000300.SS 之类会只回 1 个点）
-      if (cfg.cn) {
+      // A 股指数：依次尝试国内源（数据完整），Yahoo 只当最后兜底
+      const cnSources = [];
+      if (cfg.cn) cnSources.push({ name: `东财 ${cfg.cn}`, run: () => fetchEastmoneyDaily(cfg.cn) });
+      if (cfg.tx) cnSources.push({ name: `腾讯 ${cfg.tx}`, run: () => fetchTencentDaily(cfg.tx) });
+
+      for (const s of cnSources) {
+        if (series.length >= INDEX_MIN_OK) break;
         try {
-          const cn = normalizeSeries(await fetchEastmoneyDaily(cfg.cn));
-          if (cn.length >= INDEX_MIN_OK) {
-            series = cn;
-            source = `东财 ${cfg.cn}`;
+          const got = normalizeSeries(await s.run());
+          if (got.length >= INDEX_MIN_OK) {
+            series = got;
+            source = s.name;
           } else {
-            console.warn(`  ! 东财 ${cfg.cn} 仅 ${cn.length} 条，改用 Yahoo`);
+            console.warn(`  ! ${s.name} 仅 ${got.length} 条，换下一个源`);
           }
         } catch (e) {
-          console.warn(`  ! 东财 ${cfg.cn} 不可用: ${e.message}，改用 Yahoo`);
+          console.warn(`  ! ${s.name} 不可用: ${e.message}，换下一个源`);
         }
       }
 
@@ -553,4 +577,6 @@ export {
   normalizeSeries,
   trimSeries,
   fetchEastmoneyDaily,
+  fetchTencentDaily,
+  INDEX_MAP,
 };
