@@ -74,6 +74,27 @@ body {
 .last-update {
   font-size: 12px;
   color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+/* 取数源标记：与「数据日期」同处元信息行，保持最弱视觉权重 */
+.data-source {
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 360px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px dotted transparent;
+  cursor: help;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.data-source:hover {
+  color: var(--text-secondary);
+  border-bottom-color: var(--text-tertiary);
 }
 
 .topbar-right {

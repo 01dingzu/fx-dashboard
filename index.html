@@ -14,6 +14,8 @@
       <div class="topbar-left">
         <h1 class="logo">汇率及其他理财标的观察台</h1>
         <span id="last-update" class="last-update"></span>
+        <!-- 取数源标记：低调地放在元信息行，悬停可看主备关系与来源说明 -->
+        <span id="data-source" class="data-source" title="数据取自：SAFE 人民币汇率中间价（中国外汇交易中心，每日更新的静态文件）、Frankfurter（ECB 参考汇率）、gold-api.com（贵金属现价）、静态 JSON（贵金属历史 / 国债收益率 / 股指）。主源失败时会自动回退到备源。">数据源: 取数中</span>
       </div>
       <div class="topbar-right">
         <button id="refresh-btn" class="topbar-btn" title="刷新">

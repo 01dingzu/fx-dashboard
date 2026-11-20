@@ -128,6 +128,13 @@ const Adapters = {
   /** 取数失败原因（assetId -> 简短说明）。界面据此显示「获取失败·重试」而不是假装还在加载 */
   failReasons: {},
 
+  /** 本轮「最新值」实际命中的数据源（去重），供顶部元信息行标注 */
+  hitSources: new Set(),
+
+  _noteSource(name) {
+    if (name) this.hitSources.add(name);
+  },
+
   _noteFail(assetId, reason) {
     if (assetId) this.failReasons[assetId] = reason;
     else console.warn('[adapters]', reason);
@@ -163,6 +170,7 @@ const Adapters = {
     this.cache.clear();
     this._inflight.clear();
     this._safeRatesCache = null;
+    this.hitSources.clear();
   },
 
   _cacheKey(...args) { return args.join('|'); },
@@ -193,7 +201,10 @@ const Adapters = {
   _safeRatesCache: null,
 
   async _safeLoadRates() {
-    if (this._safeRatesCache) return this._safeRatesCache;
+    if (this._safeRatesCache) {
+      this._noteSource('SAFE 中间价');
+      return this._safeRatesCache;
+    }
     // 人民币对的行情全靠这一份文件，取不到就是汇率区整体没数据 →
     // 和 _loadStaticJson 一样做「失败后带 cache-busting 再试一次」。
     // 外面套 _coalesce：首屏 5 个人民币对并发进来只发 1 次请求。
@@ -205,6 +216,7 @@ const Adapters = {
           if (!resp.ok) continue;
           const data = await resp.json();
           this._safeRatesCache = data;
+          this._noteSource('SAFE 中间价');
           return data;
         } catch { /* 换下一次尝试 */ }
       }
@@ -273,6 +285,7 @@ const Adapters = {
       const change = prevRate != null ? rate - prevRate : null;
       const changePercent = prevRate != null && prevRate !== 0 ? (change / prevRate) * 100 : null;
 
+      this._noteSource('Frankfurter');
       return { value: rate, date: data.date, prevValue: prevRate, change, changePercent };
     } catch (e) {
       this._noteFail(asset.id, `Frankfurter 请求失败: ${(e && e.message) || e}`);
@@ -373,6 +386,7 @@ const Adapters = {
           const change = prevValue != null ? data.price - prevValue : null;
           const changePercent = prevValue != null && prevValue !== 0 ? (change / prevValue) * 100 : null;
 
+          this._noteSource('gold-api.com');
           return {
             value: data.price,
             date: data.updatedAt ? data.updatedAt.split('T')[0] : this._formatDate(new Date()),
@@ -397,6 +411,7 @@ const Adapters = {
       }
       const change = prevValue != null ? tdPrice - prevValue : null;
       const changePercent = prevValue != null && prevValue !== 0 ? (change / prevValue) * 100 : null;
+      this._noteSource('Twelve Data');
       return { value: tdPrice, date: this._formatDate(new Date()), prevValue, change, changePercent };
     }
 
@@ -415,6 +430,7 @@ const Adapters = {
       const change = prevValue != null ? price - prevValue : null;
       const changePercent = prevValue != null && prevValue !== 0 ? (change / prevValue) * 100 : null;
       
+      this._noteSource('静态 JSON');
       return { value: price, date, prevValue, change, changePercent };
     }
     
@@ -524,7 +540,10 @@ const Adapters = {
   async _loadStaticJson(path, assetId = null) {
     const key = `static_${path}`;
     const cached = this._getCache(key);
-    if (cached) return cached;
+    if (cached) {
+      this._noteSource('静态 JSON');
+      return cached;
+    }
 
     // 同一文件被多个标的共用时（如 metals-current.json）合并成一次请求；
     // 失败原因放在结果里回传，这样每个调用标的都能登记自己的失败态。
@@ -537,6 +556,7 @@ const Adapters = {
           if (!resp.ok) { reason = `HTTP ${resp.status}`; continue; }
           const data = await resp.json();
           this._setCache(key, data);
+          this._noteSource('静态 JSON');
           return { data, reason: '' };
         } catch (e) {
           reason = e && e.name === 'AbortError' ? '请求超时' : String((e && e.message) || e);
@@ -602,6 +622,7 @@ const Adapters = {
   async getAllLatest(assets) {
     const results = {};
     this.failReasons = {};
+    this.hitSources.clear();
     await Promise.all(assets.map(async (asset) => {
       try {
         results[asset.id] = await this.getLatest(asset);

@@ -377,9 +377,30 @@ const Dashboard = {
     }
   },
 
+  /** 顶部元信息行：低调标注本轮实际命中的取数源，悬停看主备关系 */
+  renderSourceLabel() {
+    const el = document.getElementById('data-source');
+    if (!el) return;
+    const order = ['SAFE 中间价', 'Frankfurter', 'gold-api.com', 'Twelve Data', '静态 JSON'];
+    const rank = x => { const i = order.indexOf(x); return i < 0 ? 999 : i; };
+    const hits = [...(Adapters.hitSources || [])].sort((a, b) => rank(a) - rank(b));
+
+    el.textContent = hits.length ? `数据源: ${hits.join(' / ')}` : '数据源: 暂无数据';
+    el.title = [
+      '数据取自：',
+      '· SAFE 人民币汇率中间价 — 中国外汇交易中心，CNY 货币对主源（每日更新的静态文件）',
+      '· Frankfurter — ECB 参考汇率，非 CNY 对主源 / CNY 对备源',
+      '· gold-api.com — 贵金属现价主源，失败依次回退 Twelve Data → 静态 JSON',
+      '· 静态 JSON — 贵金属历史 / 美债收益率 / 股指，站点数据文件每日更新',
+      '',
+      `本轮实际命中：${hits.length ? hits.join(' / ') : '无'}`,
+    ].join('\n');
+  },
+
   async loadAllLatest() {
     if (this.assets.length === 0) {
       this.dataLoaded = true;
+      this.renderSourceLabel();
       this.renderDataStatusBar();
       return;
     }
@@ -392,6 +413,7 @@ const Dashboard = {
     if (latestEntry) {
       document.getElementById('last-update').textContent = `数据日期: ${latestEntry.date}`;
     }
+    this.renderSourceLabel();
     this.renderDataStatusBar();
   },
 
